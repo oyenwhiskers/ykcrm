@@ -12,7 +12,7 @@ RUN composer install \
     --no-scripts \
     --optimize-autoloader
 
-FROM php:8.3-cli-bookworm AS app
+FROM php:8.4-cli-bookworm AS app
 
 WORKDIR /var/www/html
 
