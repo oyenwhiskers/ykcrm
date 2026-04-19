@@ -33,6 +33,8 @@ You can also watch bite-sized lessons with real-world projects on [Laravel Learn
 
 This repository includes a production-oriented Dockerfile for Dokploy and similar platforms.
 
+The current deployment image does not run `npm run build` because the active Blade views do not reference Vite assets. If frontend asset bundling is added later through `@vite(...)`, restore a frontend build stage before deploying.
+
 ### Web service
 
 - Build context: repository root

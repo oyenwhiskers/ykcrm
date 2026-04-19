@@ -11,20 +11,6 @@ RUN composer install \
     --no-progress \
     --optimize-autoloader
 
-FROM node:22-alpine AS frontend
-
-WORKDIR /app
-
-COPY package.json package-lock.json* ./
-
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
-
-COPY resources ./resources
-COPY public ./public
-COPY vite.config.js ./
-
-RUN npm run build
-
 FROM php:8.3-cli-bookworm AS app
 
 WORKDIR /var/www/html
@@ -79,7 +65,6 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY . .
 COPY --from=vendor /app/vendor ./vendor
-COPY --from=frontend /app/public/build ./public/build
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r services/extraction-service/requirements.txt
