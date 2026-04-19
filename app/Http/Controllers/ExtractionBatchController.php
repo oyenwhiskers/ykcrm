@@ -197,6 +197,10 @@ class ExtractionBatchController extends Controller
             'eta_basis' => $eta['estimation_basis'],
             'elapsed_seconds' => $elapsed['seconds'],
             'elapsed_label' => $elapsed['label'],
+            'worker_summary' => [
+                'queue' => max(1, (int) env('QUEUE_WORKER_PROCESSES', 1)),
+                'extraction' => max(1, (int) config('services.extraction.workers', 1)),
+            ],
             'images' => collect($batch['images'] ?? [])->map(fn (array $image) => [
                 'id' => $image['id'],
                 'status' => $image['status'],

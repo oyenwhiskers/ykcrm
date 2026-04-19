@@ -191,38 +191,84 @@
             }
 
             .selected-files {
-                display: flex;
-                flex-wrap: wrap;
-                justify-content: center;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr);
                 gap: 10px;
-                margin: 16px 0 0;
+                width: min(560px, 100%);
+                margin: 18px auto 0;
                 padding: 0;
                 list-style: none;
             }
 
             .selected-file {
-                display: inline-flex;
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto;
                 align-items: center;
-                gap: 8px;
-                max-width: 100%;
-                padding: 8px 12px;
-                border: 1px solid #d8e5f8;
-                border-radius: 999px;
-                background: #ffffff;
+                gap: 12px;
+                width: 100%;
+                padding: 12px 14px;
+                border: 1px solid #d7e3f6;
+                border-radius: 16px;
+                background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+                box-shadow: 0 6px 18px rgba(29, 58, 108, 0.06);
                 color: #46617e;
                 font-size: 12px;
                 font-weight: 600;
+                text-align: left;
             }
 
-            .selected-file strong,
-            .selected-file span {
+            .selected-file-icon {
+                width: 34px;
+                height: 34px;
+                display: grid;
+                place-items: center;
+                border-radius: 12px;
+                background: #edf4ff;
+                color: #315f95;
+                flex: 0 0 auto;
+            }
+
+            .selected-file-content {
                 min-width: 0;
             }
 
-            .selected-file span {
+            .selected-file-name,
+            .selected-file-meta {
+                min-width: 0;
+            }
+
+            .selected-file-name {
+                display: block;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                color: #2a4770;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            .selected-file-meta {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-top: 4px;
+                color: #7c8ba5;
+                font-size: 11px;
+                font-weight: 600;
+                flex-wrap: wrap;
+            }
+
+            .selected-file-size {
+                display: inline-flex;
+                align-items: center;
+                padding: 3px 8px;
+                border-radius: 999px;
+                background: #eef4ff;
+                color: #46617e;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
             }
 
             .selected-file-remove {
@@ -230,17 +276,24 @@
                 align-items: center;
                 justify-content: center;
                 flex: 0 0 auto;
-                width: 18px;
-                height: 18px;
+                width: 26px;
+                height: 26px;
                 border: 0;
                 border-radius: 999px;
                 background: #edf4ff;
                 color: #567291;
                 cursor: pointer;
                 font: inherit;
-                font-size: 12px;
+                font-size: 15px;
                 font-weight: 700;
                 line-height: 1;
+                transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+            }
+
+            .selected-file-remove:hover:not(:disabled) {
+                background: #e1ecff;
+                color: #2f5888;
+                transform: translateY(-1px);
             }
 
             .selected-file-remove:disabled {
@@ -257,7 +310,6 @@
                 color: #255486;
                 font-size: 11px;
                 font-weight: 700;
-                text-transform: capitalize;
             }
 
             .status-chip.processing,
@@ -333,7 +385,9 @@
                 display: grid;
                 grid-template-columns: repeat(3, minmax(0, 1fr));
                 gap: 10px;
-                min-width: min(100%, 440px);
+                flex: 0 1 760px;
+                min-width: min(100%, 620px);
+                width: min(100%, 760px);
             }
 
             .progress-summary-card {
@@ -342,6 +396,7 @@
                 border-radius: 12px;
                 background: linear-gradient(180deg, #fbfdff 0%, #f5f9ff 100%);
                 text-align: right;
+                min-width: 0;
             }
 
             .progress-summary-label {
@@ -385,7 +440,6 @@
                 color: #335b8d;
                 font-size: 11px;
                 font-weight: 700;
-                text-transform: capitalize;
             }
 
             .estimator-pill.low {
@@ -553,11 +607,55 @@
                 justify-content: space-between;
                 gap: 14px;
                 margin-bottom: 12px;
+                flex-wrap: wrap;
             }
 
             .section-heading {
                 margin: 0;
                 font-size: 15px;
+                font-weight: 700;
+            }
+
+            .section-heading-group {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                flex-wrap: wrap;
+                min-width: 0;
+            }
+
+            .section-badges {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .section-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 7px 12px;
+                border: 1px solid #dde7f6;
+                border-radius: 999px;
+                background: #f4f8ff;
+                color: #294a71;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.02em;
+            }
+
+            .section-badge-label {
+                color: #7a8aa6;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+            }
+
+            .section-badge-value {
+                color: #24476d;
+                font-size: 12px;
                 font-weight: 700;
             }
 
@@ -741,6 +839,10 @@
                     align-items: flex-start;
                 }
 
+                .section-heading-group {
+                    width: 100%;
+                }
+
                 .tabs {
                     width: 100%;
                 }
@@ -771,6 +873,20 @@
                     max-width: 100%;
                 }
 
+                .selected-files {
+                    width: 100%;
+                }
+
+                .selected-file {
+                    grid-template-columns: auto minmax(0, 1fr);
+                }
+
+                .selected-file-remove {
+                    grid-column: 2;
+                    justify-self: end;
+                    margin-top: -2px;
+                }
+
                 .progress-header {
                     flex-direction: column;
                     align-items: flex-start;
@@ -779,6 +895,7 @@
                 .progress-summary {
                     grid-template-columns: repeat(2, minmax(0, 1fr));
                     width: 100%;
+                    min-width: 0;
                 }
 
                 .progress-stats {
@@ -827,7 +944,7 @@
 
                         <h2 class="upload-title">Import Source Data</h2>
                         <p class="upload-copy" id="upload-copy">
-                            Upload your PDF reports, CSV logs, or raw text files. Our ledger will automatically parse and classify lead data.
+                            Upload WhatsApp screenshots or lead images. The system will extract contacts, confidence scores, and review-ready records.
                         </p>
 
                         <div>
@@ -899,7 +1016,19 @@
 
             <section class="panel section-card">
                 <div class="section-header">
-                    <h2 class="section-heading">Extracted Data</h2>
+                    <div class="section-heading-group">
+                        <h2 class="section-heading">Extracted Data</h2>
+                        <div class="section-badges" aria-live="polite">
+                            <div class="section-badge">
+                                <span class="section-badge-label">Leads</span>
+                                <span class="section-badge-value" id="results-lead-count">0</span>
+                            </div>
+                            <div class="section-badge">
+                                <span class="section-badge-label">Avg Confidence</span>
+                                <span class="section-badge-value" id="results-confidence-average">N/A</span>
+                            </div>
+                        </div>
+                    </div>
                     <button type="button" class="table-action" id="commit-leads-button" disabled>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M12 5V19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -983,6 +1112,8 @@
             const completedCount = document.getElementById('completed-count');
             const failedCount = document.getElementById('failed-count');
             const imageQueue = document.getElementById('image-queue');
+            const resultsLeadCount = document.getElementById('results-lead-count');
+            const resultsConfidenceAverage = document.getElementById('results-confidence-average');
 
             let activeBatchId = null;
             let pollingHandle = null;
@@ -1020,7 +1151,15 @@
                 progressPanel.classList.add('active');
                 progressHeading.textContent = headline;
                 progressCopy.textContent = detail;
-                progressStateChip.textContent = tone;
+                const toneLabels = {
+                    uploading: 'Uploading',
+                    saving: 'Saving',
+                    error: 'Needs attention',
+                    failed: 'Needs attention',
+                    saved: 'Saved',
+                    idle: 'Idle',
+                };
+                progressStateChip.textContent = toneLabels[tone] || formatBatchStateLabel(tone);
                 progressStateChip.className = `status-chip ${tone}`;
                 latestStatusDetail = detail;
             };
@@ -1054,17 +1193,17 @@
 
             const formatEstimatorBasis = (basis, status) => {
                 if (isCompletedBatch(status)) {
-                    return 'Measured from this batch';
+                    return 'Runtime measured from this batch';
                 }
 
                 if (!basis) {
-                    return 'Historical model';
+                    return 'Estimate source: historical model';
                 }
 
                 const labels = {
-                    historical: 'Historical model',
-                    batch: 'Current batch data',
-                    blended: 'Batch plus history',
+                    historical: 'Estimate source: historical model',
+                    batch: 'Estimate source: current batch',
+                    blended: 'Estimate source: batch + history',
                 };
 
                 return labels[basis] || basis.replaceAll('_', ' ');
@@ -1081,8 +1220,57 @@
                 const normalized = (confidence || 'low').toLowerCase();
 
                 return {
-                    label: `${normalized} confidence`,
+                    label: `ETA confidence: ${normalized}`,
                     tone: normalized,
+                };
+            };
+
+            const formatProgressIndicator = ({ status, queued, processing, failed, totalLeads, hasUnsavedLeads }) => {
+                if (status === 'failed') {
+                    return {
+                        label: 'Needs attention',
+                        tone: 'error',
+                    };
+                }
+
+                if (processing > 0) {
+                    return {
+                        label: `${processing} active`,
+                        tone: 'processing',
+                    };
+                }
+
+                if (queued > 0) {
+                    return {
+                        label: `${queued} queued`,
+                        tone: 'queued',
+                    };
+                }
+
+                if (failed > 0 && isCompletedBatch(status)) {
+                    return {
+                        label: `${failed} failed`,
+                        tone: 'error',
+                    };
+                }
+
+                if (isCompletedBatch(status) && hasUnsavedLeads) {
+                    return {
+                        label: `${totalLeads} leads ready`,
+                        tone: 'completed',
+                    };
+                }
+
+                if (isCompletedBatch(status)) {
+                    return {
+                        label: 'Completed',
+                        tone: 'completed',
+                    };
+                }
+
+                return {
+                    label: 'Idle',
+                    tone: 'idle',
                 };
             };
 
@@ -1104,6 +1292,8 @@
                 const processing = images.filter((image) => image.status === 'processing').length;
                 const completed = images.filter((image) => image.status === 'completed').length;
                 const failed = images.filter((image) => image.status === 'failed').length;
+                const totalLeads = images.reduce((total, image) => total + (image.leads || []).length, 0);
+                const hasUnsavedLeads = images.some((image) => (image.leads || []).some((lead) => !lead.is_saved));
                 const percent = batch.total_images ? Math.round((batch.processed_images / batch.total_images) * 100) : 0;
                 const activeNames = images
                     .filter((image) => image.status === 'processing')
@@ -1121,6 +1311,16 @@
                 progressElapsedDetail.textContent = batch.status === 'completed' || batch.status === 'completed_with_failures'
                     ? 'Actual total processing time'
                     : 'Measured from first worker start';
+                const progressIndicator = formatProgressIndicator({
+                    status: batch.status,
+                    queued,
+                    processing,
+                    failed,
+                    totalLeads,
+                    hasUnsavedLeads,
+                });
+                progressStateChip.textContent = progressIndicator.label;
+                progressStateChip.className = `status-chip ${progressIndicator.tone}`;
                 const estimatorConfidence = formatEstimatorConfidence(batch.eta_confidence, batch.status);
                 progressConfidence.textContent = estimatorConfidence.label;
                 progressConfidence.className = `estimator-pill ${estimatorConfidence.tone}`;
@@ -1159,6 +1359,8 @@
 
             const renderEmptyState = () => {
                 resultsBody.innerHTML = emptyStateMarkup;
+                resultsLeadCount.textContent = '0';
+                resultsConfidenceAverage.textContent = 'N/A';
             };
 
             const renderSelectedBatchFiles = (batch) => {
@@ -1168,7 +1370,7 @@
                 selectedFiles.innerHTML = '';
 
                 if (!images.length) {
-                    uploadCopy.textContent = 'Upload your PDF reports, CSV logs, or raw text files. Our ledger will automatically parse and classify lead data.';
+                    uploadCopy.textContent = 'Upload WhatsApp screenshots or lead images. The system will extract contacts, confidence scores, and review-ready records.';
                     return;
                 }
 
@@ -1178,9 +1380,22 @@
                     const item = document.createElement('li');
                     item.className = 'selected-file';
                     item.innerHTML = `
-                        <strong>${Math.max(1, Math.round((image.size ?? 0) / 1024))} KB</strong>
-                        <span>${image.original_name}</span>
-                        ${canRemove ? `<button type="button" class="selected-file-remove" data-image-id="${image.id}" ${removingImageId === image.id ? 'disabled' : ''} aria-label="Remove ${image.original_name}">x</button>` : ''}
+                        <div class="selected-file-icon" aria-hidden="true">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M8 7H16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                                <path d="M8 12H13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                                <path d="M8 17H12" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+                                <path d="M7.75 21H16.25C18.7353 21 20 19.7353 20 17.25V6.75C20 4.26472 18.7353 3 16.25 3H7.75C5.26472 3 4 4.26472 4 6.75V17.25C4 19.7353 5.26472 21 7.75 21Z" stroke="currentColor" stroke-width="1.7"/>
+                            </svg>
+                        </div>
+                        <div class="selected-file-content">
+                            <span class="selected-file-name">${image.original_name}</span>
+                            <div class="selected-file-meta">
+                                <span class="selected-file-size">${Math.max(1, Math.round((image.size ?? 0) / 1024))} KB</span>
+                                <span>Queued for extraction</span>
+                            </div>
+                        </div>
+                        ${canRemove ? `<button type="button" class="selected-file-remove" data-image-id="${image.id}" ${removingImageId === image.id ? 'disabled' : ''} aria-label="Remove ${image.original_name}">&times;</button>` : ''}
                     `;
                     selectedFiles.appendChild(item);
                 });
@@ -1194,6 +1409,20 @@
                 return `${Math.round(value)}%`;
             };
 
+            const updateResultsSummary = (leads) => {
+                resultsLeadCount.textContent = String(leads.length);
+
+                const scoredLeads = leads.filter((lead) => lead.confidence_score != null && Number.isFinite(Number(lead.confidence_score)));
+
+                if (!scoredLeads.length) {
+                    resultsConfidenceAverage.textContent = 'N/A';
+                    return;
+                }
+
+                const averageConfidence = scoredLeads.reduce((total, lead) => total + Number(lead.confidence_score), 0) / scoredLeads.length;
+                resultsConfidenceAverage.textContent = formatConfidence(averageConfidence);
+            };
+
             const renderBatchResults = (batch) => {
                 const leads = (batch.images || []).flatMap((image) =>
                     (image.leads || []).map((lead) => ({
@@ -1201,6 +1430,8 @@
                         image,
                     }))
                 );
+
+                updateResultsSummary(leads);
 
                 if (!leads.length) {
                     renderEmptyState();
