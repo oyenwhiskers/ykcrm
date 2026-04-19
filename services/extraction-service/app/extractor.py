@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +20,14 @@ LABEL_BLACKLIST = {
     "phone number",
     "work phone",
     "get leads",
+}
+LABEL_BLACKLIST_COMPACT = {
+    "raw",
+    "whatsapp",
+    "name",
+    "phonenumber",
+    "workphone",
+    "getleads",
 }
 
 
@@ -71,6 +80,59 @@ def _preprocess_variants(image: np.ndarray) -> list[np.ndarray]:
     return variants
 
 
+def _normalize_for_matching(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text).casefold().strip()
+
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _compact_token(text: str) -> str:
+    return "".join(character for character in _normalize_for_matching(text) if character.isalnum())
+
+
+def _clean_name_text(text: str) -> str | None:
+    normalized = unicodedata.normalize("NFKC", text).strip()
+
+    if not normalized:
+        return None
+
+    normalized = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", normalized)
+    normalized = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", normalized)
+
+    characters: list[str] = []
+    for character in normalized:
+        if character.isalpha() or character in {"'", "-"}:
+            characters.append(character)
+        elif character.isspace() or character in {"_", "/", "|", "+", "&"}:
+            characters.append(" ")
+        else:
+            characters.append(" ")
+
+    cleaned = re.sub(r"\s+", " ", "".join(characters)).strip(" -'")
+
+    return cleaned or None
+
+
+def _looks_like_name_text(text: str) -> bool:
+    if _is_noise_text(text):
+        return False
+
+    cleaned = _clean_name_text(text)
+    if not cleaned:
+        return False
+
+    words = cleaned.split()
+    alpha_count = sum(character.isalpha() for character in cleaned)
+
+    if alpha_count < 3:
+        return False
+
+    if len(words) == 1 and alpha_count < 4:
+        return False
+
+    return True
+
+
 def _score_ocr_lines(lines: list[OCRLine]) -> float:
     if not lines:
         return 0.0
@@ -78,30 +140,17 @@ def _score_ocr_lines(lines: list[OCRLine]) -> float:
     average_confidence = sum(line.confidence for line in lines) / len(lines)
     phone_hits = sum(1 for line in lines if PHONE_PATTERN.search(line.text))
     meaningful_lines = sum(1 for line in lines if len(line.text.strip()) >= 4)
+    plausible_name_hits = sum(1 for line in lines if _looks_like_name_text(line.text))
+    noise_hits = sum(1 for line in lines if _is_noise_text(line.text))
 
     return (
         len(lines)
         + (average_confidence * 10.0)
         + (phone_hits * 12.0)
         + (meaningful_lines * 0.35)
+        + (plausible_name_hits * 2.5)
+        - (noise_hits * 0.45)
     )
-
-
-def _is_good_enough_ocr(lines: list[OCRLine]) -> bool:
-    if not lines:
-        return False
-
-    average_confidence = sum(line.confidence for line in lines) / len(lines)
-    phone_hits = sum(1 for line in lines if PHONE_PATTERN.search(line.text))
-    meaningful_lines = sum(1 for line in lines if len(line.text.strip()) >= 4)
-
-    if phone_hits >= 1 and meaningful_lines >= 3 and average_confidence >= 0.58:
-        return True
-
-    if len(lines) >= 8 and meaningful_lines >= 6 and average_confidence >= 0.68:
-        return True
-
-    return False
 
 
 def _run_ocr(image: np.ndarray) -> tuple[list[OCRLine], str]:
@@ -109,7 +158,7 @@ def _run_ocr(image: np.ndarray) -> tuple[list[OCRLine], str]:
     best_lines: list[OCRLine] = []
     best_score = float('-inf')
 
-    for index, variant in enumerate(_preprocess_variants(image)):
+    for variant in _preprocess_variants(image):
         results, _ = engine(variant)
         lines = _normalize_ocr_results(results or [])
         score = _score_ocr_lines(lines)
@@ -117,15 +166,6 @@ def _run_ocr(image: np.ndarray) -> tuple[list[OCRLine], str]:
         if score > best_score:
             best_lines = lines
             best_score = score
-
-        # Fast path: stop once earlier passes already look reliable enough.
-        if _is_good_enough_ocr(lines):
-            best_lines = lines
-            break
-
-        # After the second pass, only continue to the thresholded fallback if signal is still weak.
-        if index == 1 and best_score >= 14.0:
-            break
 
     raw_text = "\n".join(line.text for line in best_lines)
 
@@ -201,12 +241,19 @@ def _normalize_phone_number(text: str) -> str | None:
 
 
 def _is_noise_text(text: str) -> bool:
-    normalized = re.sub(r"\s+", " ", text.strip().lower())
+    normalized = _normalize_for_matching(text)
+    compact = _compact_token(text)
 
     if not normalized:
         return True
 
     if normalized in LABEL_BLACKLIST:
+        return True
+
+    if compact in LABEL_BLACKLIST_COMPACT:
+        return True
+
+    if compact.startswith("phonenumber") or compact.startswith("workphone") or compact.startswith("getleads"):
         return True
 
     if DATE_PATTERN.search(normalized):
@@ -215,13 +262,21 @@ def _is_noise_text(text: str) -> bool:
     if normalized.startswith("raw") and len(normalized.split()) <= 2:
         return True
 
+    cleaned_name = _clean_name_text(text)
+    if not cleaned_name:
+        return True
+
     return False
 
 
 def _score_name_candidate(line: OCRLine, phone_line: OCRLine) -> float:
     text = line.text.strip()
+    cleaned_text = _clean_name_text(text)
+    if not cleaned_text:
+        return float("-inf")
+
+    compact_text = re.sub(r"\s+", "", cleaned_text)
     word_count = len(text.split())
-    compact_text = re.sub(r"\s+", "", text)
     score = 0.0
 
     if line.center_y <= phone_line.center_y:
@@ -232,15 +287,15 @@ def _score_name_candidate(line: OCRLine, phone_line: OCRLine) -> float:
     if line.center_x < phone_line.center_x:
         score += 1.25
 
-    if word_count >= 2:
+    if len(cleaned_text.split()) >= 2:
         score += 2.0
-    elif len(text) >= 6:
+    elif len(cleaned_text) >= 6:
         score += 0.8
 
     if len(compact_text) == 1:
         score -= 4.5
 
-    digit_count = sum(character.isdigit() for character in compact_text)
+    digit_count = sum(character.isdigit() for character in text)
     alpha_count = sum(character.isalpha() for character in compact_text)
 
     if digit_count:
@@ -252,8 +307,14 @@ def _score_name_candidate(line: OCRLine, phone_line: OCRLine) -> float:
     if len(compact_text) >= 8:
         score += 0.6
 
-    if text.isupper() and word_count == 1:
+    if cleaned_text.isupper() and len(cleaned_text.split()) == 1:
         score -= 0.3
+
+    if _compact_token(text) in LABEL_BLACKLIST_COMPACT:
+        score -= 8.0
+
+    if alpha_count < 4:
+        score -= 2.5
 
     return score
 
@@ -261,7 +322,7 @@ def _score_name_candidate(line: OCRLine, phone_line: OCRLine) -> float:
 def _candidate_name_from_block(block: list[OCRLine], phone_line: OCRLine) -> str | None:
     name_candidates = [
         line for line in block
-        if not _is_noise_text(line.text)
+        if _looks_like_name_text(line.text)
         and not PHONE_PATTERN.search(line.text)
     ]
 
@@ -271,7 +332,7 @@ def _candidate_name_from_block(block: list[OCRLine], phone_line: OCRLine) -> str
         score = _score_name_candidate(candidate, phone_line)
         if score > best_score:
             best_score = score
-            best_name = candidate.text.strip()
+            best_name = _clean_name_text(candidate.text)
 
     return best_name
 
@@ -279,7 +340,7 @@ def _candidate_name_from_block(block: list[OCRLine], phone_line: OCRLine) -> str
 def _extract_records(blocks: list[list[OCRLine]]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
 
-    for index, block in enumerate(blocks):
+    for block in blocks:
         phone_lines: list[tuple[OCRLine, str]] = []
 
         for line in block:
@@ -303,10 +364,6 @@ def _extract_records(blocks: list[list[OCRLine]]) -> list[dict[str, Any]]:
         primary_phone, primary_phone_line = next(iter(unique_phones.items()))
 
         best_name = _candidate_name_from_block(block, primary_phone_line)
-
-        if not best_name and index > 0:
-            previous_block = blocks[index - 1]
-            best_name = _candidate_name_from_block(previous_block, primary_phone_line)
 
         block_confidence = min(
             0.99,
