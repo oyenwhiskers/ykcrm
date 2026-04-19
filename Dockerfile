@@ -9,6 +9,7 @@ RUN composer install \
     --prefer-dist \
     --no-interaction \
     --no-progress \
+    --no-scripts \
     --optimize-autoloader
 
 FROM php:8.3-cli-bookworm AS app
@@ -65,6 +66,11 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY . .
 COPY --from=vendor /app/vendor ./vendor
+
+RUN composer dump-autoload \
+    --no-dev \
+    --optimize \
+    --no-interaction
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r services/extraction-service/requirements.txt
