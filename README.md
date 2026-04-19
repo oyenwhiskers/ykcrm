@@ -29,6 +29,69 @@ In addition, [Laracasts](https://laracasts.com) contains thousands of video tuto
 
 You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
 
+## Docker Deployment
+
+This repository includes a production-oriented Dockerfile for Dokploy and similar platforms.
+
+### Web service
+
+- Build context: repository root
+- Dockerfile: `Dockerfile`
+- Container port: `8000`
+- Default runtime role: `all`
+
+By default the container starts all three runtime processes together:
+
+- Laravel HTTP server on port `8000`
+- `4` Laravel queue workers
+- Extraction API on `127.0.0.1:8001` with `4` uvicorn workers
+
+Required environment variables for production include:
+
+- `APP_KEY`
+- `APP_URL`
+- `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`
+- `QUEUE_CONNECTION`
+- `EXTRACTION_SERVICE_URL`
+
+Optional startup flags:
+
+- `RUN_MIGRATIONS=true` to run `php artisan migrate --force` during container startup
+- `CREATE_STORAGE_LINK=true` to create `public/storage`
+
+Default worker tuning:
+
+- `QUEUE_WORKER_PROCESSES=4`
+- `QUEUE_NAMES=default`
+- `QUEUE_TRIES=3`
+- `QUEUE_SLEEP=3`
+- `QUEUE_TIMEOUT=0`
+- `EXTRACTION_SERVICE_WORKERS=4`
+- `EXTRACTION_BIND_HOST=127.0.0.1`
+- `EXTRACTION_BIND_PORT=8001`
+
+### Queue worker
+
+Reuse the same image for a worker service and set:
+
+- `CONTAINER_ROLE=worker`
+
+Optional worker tuning:
+
+- `QUEUE_NAMES=default`
+- `QUEUE_TRIES=3`
+- `QUEUE_SLEEP=3`
+- `QUEUE_TIMEOUT=0`
+
+### Dokploy values
+
+- App Type: Dockerfile
+- Dockerfile path: `Dockerfile`
+- Container Port: `8000`
+- Start command override: leave empty for the combined container
+
+The Laravel app should keep `EXTRACTION_SERVICE_URL=http://127.0.0.1:8001` when using the combined image.
+
 ## Agentic Development
 
 Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
