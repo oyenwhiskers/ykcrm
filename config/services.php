@@ -42,6 +42,7 @@ return [
         'workers' => max(1, (int) env('EXTRACTION_SERVICE_WORKERS', 2)),
         'default_image_seconds' => max(5, (int) env('EXTRACTION_DEFAULT_IMAGE_SECONDS', 18)),
         'low_confidence_threshold' => (float) env('EXTRACTION_LOW_CONFIDENCE_THRESHOLD', 0.85),
+        'stale_batch_minutes' => max(5, (int) env('EXTRACTION_STALE_BATCH_MINUTES', 30)),
     ],
 
 ];

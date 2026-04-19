@@ -52,6 +52,17 @@ stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 
+[program:scheduler]
+command=sh -c 'while true; do php artisan schedule:run --verbose --no-interaction; sleep 60; done'
+directory=/var/www/html
+autostart=true
+autorestart=true
+priority=25
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
 [program:extraction]
 command=python -m uvicorn app.main:app --host ${EXTRACTION_BIND_HOST:-127.0.0.1} --port ${EXTRACTION_BIND_PORT:-8001} --workers ${EXTRACTION_SERVICE_WORKERS:-4}
 directory=/var/www/html/services/extraction-service

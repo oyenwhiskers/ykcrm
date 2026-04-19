@@ -15,6 +15,8 @@ class ExtractionBatchUploadTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const PNG_PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoMBgQm5cVwAAAAASUVORK5CYII=';
+
     private ?string $originalQueueWorkerProcesses = null;
 
     protected function setUp(): void
@@ -40,8 +42,8 @@ class ExtractionBatchUploadTest extends TestCase
 
         $response = $this->post(route('extraction-batches.store'), [
             'images' => [
-                UploadedFile::fake()->image('lead-one.png'),
-                UploadedFile::fake()->image('lead-two.png'),
+                $this->fakePngUpload('lead-one.png'),
+                $this->fakePngUpload('lead-two.png'),
             ],
         ]);
 
@@ -69,7 +71,7 @@ class ExtractionBatchUploadTest extends TestCase
     {
         Queue::fake();
         Storage::fake('local');
-        Storage::disk('local')->put('extraction-batches/test-image.png', UploadedFile::fake()->image('test-image.png')->getContent());
+        Storage::disk('local')->put('extraction-batches/test-image.png', $this->pngContent());
 
         $batch = app(TemporaryExtractionBatchStore::class)->create([[
             'storage_disk' => 'local',
@@ -110,7 +112,11 @@ class ExtractionBatchUploadTest extends TestCase
                 ]);
         });
 
-        (new ProcessExtractionImage($batch['id'], $image['id']))->handle($client, app(TemporaryExtractionBatchStore::class));
+        (new ProcessExtractionImage($batch['id'], $image['id']))->handle(
+            $client,
+            app(TemporaryExtractionBatchStore::class),
+            app(\App\Services\Extraction\ExtractionBatchScheduler::class),
+        );
 
         $updatedBatch = app(TemporaryExtractionBatchStore::class)->find($batch['id']);
         $updatedImage = collect($updatedBatch['images'])->firstWhere('id', $image['id']);
@@ -128,7 +134,7 @@ class ExtractionBatchUploadTest extends TestCase
     {
         Queue::fake();
         Storage::fake('local');
-        Storage::disk('local')->put('extraction-batches/test-image.png', UploadedFile::fake()->image('test-image.png')->getContent());
+        Storage::disk('local')->put('extraction-batches/test-image.png', $this->pngContent());
 
         $batch = app(TemporaryExtractionBatchStore::class)->create([[
             'storage_disk' => 'local',
@@ -203,5 +209,15 @@ class ExtractionBatchUploadTest extends TestCase
         putenv('QUEUE_WORKER_PROCESSES='.$value);
         $_ENV['QUEUE_WORKER_PROCESSES'] = $value;
         $_SERVER['QUEUE_WORKER_PROCESSES'] = $value;
+    }
+
+    private function fakePngUpload(string $name): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent($name, $this->pngContent());
+    }
+
+    private function pngContent(): string
+    {
+        return base64_decode(self::PNG_PIXEL, true);
     }
 }

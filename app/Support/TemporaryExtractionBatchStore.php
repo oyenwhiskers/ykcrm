@@ -154,6 +154,101 @@ class TemporaryExtractionBatchStore
         });
     }
 
+    public function abandon(string $batchId): ?array
+    {
+        return $this->withLock($batchId, function () use ($batchId): ?array {
+            return DB::transaction(function () use ($batchId): ?array {
+                $batch = ExtractionBatch::query()
+                    ->with(['extractionImages' => fn ($query) => $query->orderBy('created_at')->orderBy('id')])
+                    ->lockForUpdate()
+                    ->find($batchId);
+
+                if (! $batch) {
+                    return null;
+                }
+
+                $snapshot = $this->serializeBatch($batch);
+                $batch->delete();
+
+                return $snapshot;
+            });
+        });
+    }
+
+    public function cleanupStaleBatches(int $minutes): int
+    {
+        $cutoff = now()->subMinutes(max(1, $minutes));
+        $deleted = 0;
+
+        $batchIds = ExtractionBatch::query()
+            ->where('created_at', '<=', $cutoff)
+            ->whereNotIn('status', ['completed', 'completed_with_failures'])
+            ->orderBy('id')
+            ->pluck('id');
+
+        foreach ($batchIds as $batchId) {
+            $removed = $this->withLock((string) $batchId, function () use ($batchId, $cutoff, &$deleted): ?bool {
+                $fileTargets = DB::transaction(function () use ($batchId, $cutoff): ?array {
+                    $batch = ExtractionBatch::query()
+                        ->with(['extractionImages' => fn ($query) => $query->orderBy('created_at')->orderBy('id')])
+                        ->lockForUpdate()
+                        ->find($batchId);
+
+                    if (! $batch) {
+                        return null;
+                    }
+
+                    if ($batch->created_at === null || $batch->created_at->gt($cutoff)) {
+                        return null;
+                    }
+
+                    if (in_array($batch->status, ['completed', 'completed_with_failures'], true)) {
+                        return null;
+                    }
+
+                    $metadata = $batch->metadata ?? [];
+
+                    if (! empty($metadata['persisted_batch_id'])) {
+                        return null;
+                    }
+
+                    $files = $batch->extractionImages
+                        ->map(fn (ExtractionImage $image) => [
+                            'disk' => $image->storage_disk,
+                            'path' => $image->path,
+                        ])
+                        ->all();
+
+                    $batch->delete();
+
+                    return $files;
+                });
+
+                if ($fileTargets === null) {
+                    return null;
+                }
+
+                foreach ($fileTargets as $fileTarget) {
+                    $this->deleteStoredFile($fileTarget['disk'], $fileTarget['path']);
+                }
+
+                $deleted++;
+
+                return true;
+            });
+
+            if ($removed === null) {
+                continue;
+            }
+        }
+
+        if ($deleted > 0) {
+            app(ExtractionBatchScheduler::class)->dispatchAvailableSlots();
+        }
+
+        return $deleted;
+    }
+
     private function persistBatch(ExtractionBatch $batch): array
     {
         $images = $batch->extractionImages;
@@ -179,26 +274,6 @@ class TemporaryExtractionBatchStore
         return $this->serializeBatch($batch->fresh('extractionImages.extractedLeads'));
     }
 
-            public function abandon(string $batchId): ?array
-            {
-                return $this->withLock($batchId, function () use ($batchId): ?array {
-                    return DB::transaction(function () use ($batchId): ?array {
-                        $batch = ExtractionBatch::query()
-                            ->with(['extractionImages' => fn ($query) => $query->orderBy('created_at')->orderBy('id')])
-                            ->lockForUpdate()
-                            ->find($batchId);
-
-                        if (! $batch) {
-                            return null;
-                        }
-
-                        $snapshot = $this->serializeBatch($batch);
-                        $batch->delete();
-
-                        return $snapshot;
-                    });
-                });
-            }
     private function serializeBatch(ExtractionBatch $batch): array
     {
         $metadata = $batch->metadata ?? [];
@@ -258,9 +333,18 @@ class TemporaryExtractionBatchStore
         return Carbon::parse($value);
     }
 
-    private function withLock(string $batchId, callable $callback): ?array
+    private function withLock(string $batchId, callable $callback): mixed
     {
         return $this->store()->lock($this->lockKey($batchId), 10)->block(5, $callback);
+    }
+
+    private function deleteStoredFile(string $disk, string $path): void
+    {
+        try {
+            \Illuminate\Support\Facades\Storage::disk($disk)->delete($path);
+        } catch (\Throwable) {
+            // Database cleanup is more important than orphaned temp files.
+        }
     }
 
     private function lockKey(string $batchId): string
