@@ -1621,6 +1621,35 @@
                     selectedFiles.appendChild(item);
                 });
             };
+            const shouldAbandonActiveBatch = () => {
+                if (!activeBatchId || !activeBatchData) {
+                    return false;
+                }
+
+                if (activeBatchData.persisted_batch_id) {
+                    return false;
+                }
+
+                return !isCompletedBatch(activeBatchData.status);
+            };
+
+            const abandonActiveBatch = () => {
+                if (!shouldAbandonActiveBatch()) {
+                    return;
+                }
+
+                fetch(`{{ url('/extraction-batches') }}/${activeBatchId}/abandon`, {
+                    method: 'POST',
+                    keepalive: true,
+                    headers: {
+                        'X-CSRF-TOKEN': csrfToken,
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                }).catch(() => {
+                    // Ignore unload-time failures; the server remains the source of truth.
+                });
+            };
 
             browseButton.addEventListener('click', () => input.click());
 
@@ -1691,6 +1720,7 @@
                     }
                 });
             });
+            window.addEventListener('pagehide', abandonActiveBatch);
 
             renderEmptyState();
             renderProcessingQueue({

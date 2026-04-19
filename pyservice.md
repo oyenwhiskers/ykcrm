@@ -8,4 +8,5 @@ Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*uvicorn ap
 Stop-Process -Id <pid> -Force
 
 # To run the uvicorn server with 2 workers
--m uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2
+cd .\services\extraction-service
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2

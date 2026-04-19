@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Services\Extraction\ExtractionBatchScheduler;
 use App\Services\Extraction\ExtractionServiceClient;
 use App\Support\TemporaryExtractionBatchStore;
 use Illuminate\Bus\Queueable;
@@ -24,7 +25,11 @@ class ProcessExtractionImage implements ShouldQueue
     {
     }
 
-    public function handle(ExtractionServiceClient $client, TemporaryExtractionBatchStore $temporaryBatches): void
+    public function handle(
+        ExtractionServiceClient $client,
+        TemporaryExtractionBatchStore $temporaryBatches,
+        ExtractionBatchScheduler $scheduler,
+    ): void
     {
         $image = $temporaryBatches->findImage($this->batchId, $this->imageId);
 
@@ -64,6 +69,8 @@ class ProcessExtractionImage implements ShouldQueue
 
                 return $batchImage;
             });
+
+            $scheduler->dispatchAvailableSlots();
         } catch (Throwable $exception) {
             $temporaryBatches->updateImage($this->batchId, $this->imageId, function (array $batchImage) use ($exception): array {
                 $batchImage['status'] = 'queued';
@@ -85,5 +92,7 @@ class ProcessExtractionImage implements ShouldQueue
 
             return $batchImage;
         });
+
+        app(ExtractionBatchScheduler::class)->dispatchAvailableSlots();
     }
 }

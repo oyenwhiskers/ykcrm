@@ -2,11 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Jobs\ProcessExtractionImage;
 use App\Models\ExtractedLead;
 use App\Models\ExtractionBatch;
-use App\Models\ExtractionImage;
 use App\Services\Extraction\BatchEtaEstimator;
+use App\Services\Extraction\ExtractionBatchScheduler;
 use App\Support\TemporaryExtractionBatchStore;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +18,7 @@ class ExtractionBatchController extends Controller
     public function __construct(
         private TemporaryExtractionBatchStore $temporaryBatches,
         private BatchEtaEstimator $etaEstimator,
+        private ExtractionBatchScheduler $scheduler,
     )
     {
     }
@@ -43,10 +43,6 @@ class ExtractionBatchController extends Controller
             ->all();
 
         $batch = $this->temporaryBatches->create($temporaryImages, $request->user()?->id);
-
-        foreach ($batch['images'] as $image) {
-            ProcessExtractionImage::dispatch($batch['id'], $image['id']);
-        }
 
         return response()->json([
             'data' => $this->serializeTemporaryBatch($batch),
@@ -80,42 +76,25 @@ class ExtractionBatchController extends Controller
 
         abort_unless(in_array($batch['status'], ['completed', 'completed_with_failures'], true), 422, 'Wait for extraction to finish before saving leads.');
 
-        ['persisted_batch_id' => $persistedBatchId, 'created_count' => $createdCount] = DB::transaction(function () use ($batch): array {
+        ['persisted_batch_id' => $persistedBatchId, 'created_count' => $createdCount] = DB::transaction(function () use ($batchKey): array {
+            $persistedBatch = ExtractionBatch::query()
+                ->with(['extractionImages' => fn ($query) => $query->orderBy('created_at')->orderBy('id')])
+                ->lockForUpdate()
+                ->findOrFail((int) $batchKey);
+
+            $metadata = $persistedBatch->metadata ?? [];
+
+            if (! empty($metadata['persisted_batch_id'])) {
+                return [
+                    'persisted_batch_id' => (int) $metadata['persisted_batch_id'],
+                    'created_count' => 0,
+                ];
+            }
+
             $created = 0;
-            $persistedBatch = ExtractionBatch::create([
-                'uploaded_by' => $batch['uploaded_by'] ?? null,
-                'status' => $batch['status'],
-                'total_images' => $batch['total_images'],
-                'processed_images' => $batch['processed_images'],
-                'succeeded_images' => $batch['succeeded_images'],
-                'failed_images' => $batch['failed_images'],
-                'metadata' => array_merge($batch['metadata'] ?? [], [
-                    'temporary_batch_id' => $batch['id'],
-                    'committed_at' => now()->toIso8601String(),
-                ]),
-            ]);
 
-            foreach ($batch['images'] as $image) {
-                $persistedImage = ExtractionImage::create([
-                    'extraction_batch_id' => $persistedBatch->id,
-                    'storage_disk' => $image['storage_disk'],
-                    'path' => $image['path'],
-                    'original_name' => $image['original_name'],
-                    'mime_type' => $image['mime_type'] ?? null,
-                    'size' => $image['size'] ?? null,
-                    'status' => $image['status'],
-                    'attempts' => $image['attempts'] ?? 0,
-                    'extracted_records' => $image['extracted_records'] ?? 0,
-                    'confidence_avg' => $image['confidence_avg'] ?? null,
-                    'raw_response' => $image['raw_response'] ?? null,
-                    'error_message' => $image['error_message'] ?? null,
-                    'started_at' => ! empty($image['started_at']) ? CarbonImmutable::parse($image['started_at']) : null,
-                    'finished_at' => ! empty($image['finished_at']) ? CarbonImmutable::parse($image['finished_at']) : null,
-                    'created_at' => ! empty($image['created_at']) ? CarbonImmutable::parse($image['created_at']) : now(),
-                    'updated_at' => now(),
-                ]);
-
-                $records = collect(data_get($image, 'raw_response.records', []));
+            foreach ($persistedBatch->extractionImages as $persistedImage) {
+                $records = collect(data_get($persistedImage->raw_response, 'records', []));
 
                 foreach ($records as $record) {
                     ExtractedLead::create([
@@ -135,13 +114,20 @@ class ExtractionBatchController extends Controller
                 }
             }
 
+            $metadata['temporary_batch_id'] = $persistedBatch->id;
+            $metadata['persisted_batch_id'] = $persistedBatch->id;
+            $metadata['committed_at'] = now()->toIso8601String();
+
+            $persistedBatch->metadata = $metadata;
+            $persistedBatch->save();
+
             return [
                 'persisted_batch_id' => $persistedBatch->id,
                 'created_count' => $created,
             ];
         });
 
-        $batch = $this->temporaryBatches->markCommitted($batchKey, $persistedBatchId) ?? $batch;
+        $batch = $this->temporaryBatches->find($batchKey) ?? $batch;
 
         return response()->json([
             'message' => 'Extracted leads saved successfully.',
@@ -167,9 +153,33 @@ class ExtractionBatchController extends Controller
             Storage::disk($image['storage_disk'])->delete($image['path']);
         }
 
+        $this->scheduler->dispatchAvailableSlots();
+
         return response()->json([
             'message' => 'Image removed from extraction batch.',
             'data' => $this->serializeTemporaryBatch($updatedBatch),
+        ]);
+    }
+
+    public function abandon(string $batchKey): JsonResponse
+    {
+        $batch = $this->temporaryBatches->find($batchKey);
+
+        abort_unless($batch, 404);
+        abort_if(! empty($batch['persisted_batch_id']), 422, 'Saved batches cannot be abandoned.');
+        abort_if(in_array($batch['status'], ['completed', 'completed_with_failures'], true), 422, 'Completed batches cannot be abandoned.');
+
+        $abandonedBatch = $this->temporaryBatches->abandon($batchKey);
+        abort_unless($abandonedBatch, 404);
+
+        foreach ($abandonedBatch['images'] as $image) {
+            Storage::disk($image['storage_disk'])->delete($image['path']);
+        }
+
+        $this->scheduler->dispatchAvailableSlots();
+
+        return response()->json([
+            'message' => 'Extraction batch abandoned.',
         ]);
     }
 

@@ -2,166 +2,265 @@
 
 namespace App\Support;
 
+use App\Models\ExtractionBatch;
+use App\Models\ExtractionImage;
+use App\Services\Extraction\ExtractionBatchScheduler;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 
 class TemporaryExtractionBatchStore
 {
-    private const TTL_SECONDS = 21600;
-
     public function create(array $images, ?int $uploadedBy): array
     {
-        $batchId = (string) Str::uuid();
-        $createdAt = now()->toIso8601String();
+        $batch = DB::transaction(function () use ($images, $uploadedBy): ExtractionBatch {
+            $batch = ExtractionBatch::query()->create([
+                'uploaded_by' => $uploadedBy,
+                'status' => 'queued',
+                'total_images' => count($images),
+                'processed_images' => 0,
+                'succeeded_images' => 0,
+                'failed_images' => 0,
+                'metadata' => [
+                    'source' => 'manual-upload',
+                ],
+            ]);
 
-        $batch = [
-            'id' => $batchId,
-            'persisted_batch_id' => null,
-            'uploaded_by' => $uploadedBy,
-            'status' => 'queued',
-            'created_at' => $createdAt,
-            'committed_at' => null,
-            'metadata' => [
-                'source' => 'manual-upload',
-            ],
-            'total_images' => count($images),
-            'processed_images' => 0,
-            'succeeded_images' => 0,
-            'failed_images' => 0,
-            'images' => array_map(function (array $image) use ($createdAt): array {
-                return [
-                    'id' => (string) Str::uuid(),
+            foreach ($images as $image) {
+                $batch->extractionImages()->create([
                     'storage_disk' => $image['storage_disk'],
                     'path' => $image['path'],
                     'original_name' => $image['original_name'],
-                    'mime_type' => $image['mime_type'],
-                    'size' => $image['size'],
-                    'status' => 'queued',
+                    'mime_type' => $image['mime_type'] ?? null,
+                    'size' => $image['size'] ?? null,
+                    'status' => 'pending',
                     'attempts' => 0,
                     'extracted_records' => 0,
                     'confidence_avg' => null,
                     'raw_response' => null,
                     'error_message' => null,
-                    'created_at' => $createdAt,
                     'started_at' => null,
                     'finished_at' => null,
-                ];
-            }, $images),
-        ];
+                ]);
+            }
 
-        $this->store()->put($this->key($batchId), $batch, self::TTL_SECONDS);
+            return $batch->fresh('extractionImages');
+        });
 
-        return $batch;
+        app(ExtractionBatchScheduler::class)->dispatchAvailableSlots();
+
+        return $this->serializeBatch($batch->fresh('extractionImages.extractedLeads'));
     }
 
     public function find(string $batchId): ?array
     {
-        return $this->store()->get($this->key($batchId));
+        $batch = ExtractionBatch::query()
+            ->with(['extractionImages' => fn ($query) => $query->orderBy('created_at')->orderBy('id')])
+            ->find($batchId);
+
+        return $batch ? $this->serializeBatch($batch) : null;
     }
 
     public function findImage(string $batchId, string $imageId): ?array
     {
-        $batch = $this->find($batchId);
+        $image = ExtractionImage::query()
+            ->where('extraction_batch_id', $batchId)
+            ->find($imageId);
 
-        if (! $batch) {
-            return null;
-        }
-
-        return collect($batch['images'] ?? [])->firstWhere('id', $imageId);
+        return $image ? $this->serializeImage($image) : null;
     }
 
     public function updateImage(string $batchId, string $imageId, callable $mutator): ?array
     {
-        return $this->withLock($batchId, function (?array $batch) use ($imageId, $mutator): ?array {
-            if (! $batch) {
-                return null;
-            }
+        return $this->withLock($batchId, function () use ($batchId, $imageId, $mutator): ?array {
+            return DB::transaction(function () use ($batchId, $imageId, $mutator): ?array {
+                $batch = ExtractionBatch::query()->with('extractionImages')->lockForUpdate()->find($batchId);
 
-            $batch['images'] = collect($batch['images'] ?? [])
-                ->map(function (array $image) use ($imageId, $mutator): array {
-                    if ($image['id'] !== $imageId) {
-                        return $image;
-                    }
+                if (! $batch) {
+                    return null;
+                }
 
-                    return $mutator($image) ?? $image;
-                })
-                ->all();
+                $image = $batch->extractionImages->firstWhere('id', (int) $imageId);
 
-            return $this->persist($this->recalculate($batch));
+                if (! $image) {
+                    return null;
+                }
+
+                $current = $this->serializeImage($image);
+                $updated = $mutator($current) ?? $current;
+
+                $image->fill([
+                    'storage_disk' => Arr::get($updated, 'storage_disk', $image->storage_disk),
+                    'path' => Arr::get($updated, 'path', $image->path),
+                    'original_name' => Arr::get($updated, 'original_name', $image->original_name),
+                    'mime_type' => Arr::get($updated, 'mime_type', $image->mime_type),
+                    'size' => Arr::get($updated, 'size', $image->size),
+                    'status' => Arr::get($updated, 'status', $image->status),
+                    'attempts' => Arr::get($updated, 'attempts', $image->attempts),
+                    'extracted_records' => Arr::get($updated, 'extracted_records', $image->extracted_records),
+                    'confidence_avg' => Arr::get($updated, 'confidence_avg', $image->confidence_avg),
+                    'raw_response' => Arr::get($updated, 'raw_response', $image->raw_response),
+                    'error_message' => Arr::get($updated, 'error_message', $image->error_message),
+                    'started_at' => $this->nullableTimestamp(Arr::get($updated, 'started_at')),
+                    'finished_at' => $this->nullableTimestamp(Arr::get($updated, 'finished_at')),
+                ]);
+                $image->save();
+
+                return $this->persistBatch($batch->fresh('extractionImages.extractedLeads'));
+            });
         });
     }
 
     public function markCommitted(string $batchId, int $persistedBatchId): ?array
     {
-        return $this->withLock($batchId, function (?array $batch) use ($persistedBatchId): ?array {
-            if (! $batch) {
-                return null;
-            }
+        return $this->withLock($batchId, function () use ($batchId, $persistedBatchId): ?array {
+            return DB::transaction(function () use ($batchId, $persistedBatchId): ?array {
+                $batch = ExtractionBatch::query()->with('extractionImages.extractedLeads')->lockForUpdate()->find($batchId);
 
-            $batch['persisted_batch_id'] = $persistedBatchId;
-            $batch['committed_at'] = now()->toIso8601String();
+                if (! $batch) {
+                    return null;
+                }
 
-            return $this->persist($batch);
+                $metadata = $batch->metadata ?? [];
+                $metadata['persisted_batch_id'] = $persistedBatchId;
+                $metadata['committed_at'] = now()->toIso8601String();
+                $batch->metadata = $metadata;
+                $batch->save();
+
+                return $this->persistBatch($batch);
+            });
         });
     }
 
     public function removeImage(string $batchId, string $imageId): ?array
     {
-        return $this->withLock($batchId, function (?array $batch) use ($imageId): ?array {
-            if (! $batch) {
-                return null;
-            }
+        return $this->withLock($batchId, function () use ($batchId, $imageId): ?array {
+            return DB::transaction(function () use ($batchId, $imageId): ?array {
+                $batch = ExtractionBatch::query()->with('extractionImages')->lockForUpdate()->find($batchId);
 
-            $batch['images'] = collect($batch['images'] ?? [])
-                ->reject(fn (array $image) => $image['id'] === $imageId)
-                ->values()
-                ->all();
+                if (! $batch) {
+                    return null;
+                }
 
-            return $this->persist($this->recalculate($batch));
+                ExtractionImage::query()
+                    ->where('extraction_batch_id', $batchId)
+                    ->whereKey($imageId)
+                    ->delete();
+
+                return $this->persistBatch($batch->fresh('extractionImages.extractedLeads'));
+            });
         });
     }
 
-    private function recalculate(array $batch): array
+    private function persistBatch(ExtractionBatch $batch): array
     {
-        $images = collect($batch['images'] ?? []);
-        $batch['total_images'] = $images->count();
+        $images = $batch->extractionImages;
         $processed = $images->whereIn('status', ['completed', 'failed'])->count();
         $succeeded = $images->where('status', 'completed')->count();
         $failed = $images->where('status', 'failed')->count();
-        $hasProcessing = $images->contains(fn (array $image) => $image['status'] === 'processing');
+        $hasInFlight = $images->contains(fn (ExtractionImage $image) => in_array($image->status, ['queued', 'processing'], true));
 
-        $batch['processed_images'] = $processed;
-        $batch['succeeded_images'] = $succeeded;
-        $batch['failed_images'] = $failed;
-        $batch['status'] = match (true) {
-            $batch['total_images'] === 0 => 'queued',
-            $failed > 0 && $processed === (int) $batch['total_images'] => 'completed_with_failures',
-            $processed === (int) $batch['total_images'] => 'completed',
-            $processed > 0 || $hasProcessing => 'processing',
-            default => 'queued',
-        };
+        $batch->forceFill([
+            'total_images' => $images->count(),
+            'processed_images' => $processed,
+            'succeeded_images' => $succeeded,
+            'failed_images' => $failed,
+            'status' => match (true) {
+                $images->isEmpty() => 'queued',
+                $failed > 0 && $processed === $images->count() => 'completed_with_failures',
+                $processed === $images->count() => 'completed',
+                $processed > 0 || $hasInFlight => 'processing',
+                default => 'queued',
+            },
+        ])->save();
 
-        return $batch;
+        return $this->serializeBatch($batch->fresh('extractionImages.extractedLeads'));
     }
 
-    private function persist(array $batch): array
-    {
-        $this->store()->put($this->key($batch['id']), $batch, self::TTL_SECONDS);
+            public function abandon(string $batchId): ?array
+            {
+                return $this->withLock($batchId, function () use ($batchId): ?array {
+                    return DB::transaction(function () use ($batchId): ?array {
+                        $batch = ExtractionBatch::query()
+                            ->with(['extractionImages' => fn ($query) => $query->orderBy('created_at')->orderBy('id')])
+                            ->lockForUpdate()
+                            ->find($batchId);
 
-        return $batch;
+                        if (! $batch) {
+                            return null;
+                        }
+
+                        $snapshot = $this->serializeBatch($batch);
+                        $batch->delete();
+
+                        return $snapshot;
+                    });
+                });
+            }
+    private function serializeBatch(ExtractionBatch $batch): array
+    {
+        $metadata = $batch->metadata ?? [];
+
+        return [
+            'id' => (string) $batch->id,
+            'persisted_batch_id' => isset($metadata['persisted_batch_id']) ? (int) $metadata['persisted_batch_id'] : null,
+            'uploaded_by' => $batch->uploaded_by,
+            'status' => $batch->status,
+            'created_at' => $batch->created_at?->toIso8601String(),
+            'committed_at' => $metadata['committed_at'] ?? null,
+            'metadata' => $metadata,
+            'total_images' => $batch->total_images,
+            'processed_images' => $batch->processed_images,
+            'succeeded_images' => $batch->succeeded_images,
+            'failed_images' => $batch->failed_images,
+            'images' => $batch->extractionImages
+                ->sortBy(fn (ExtractionImage $image) => $image->created_at?->getTimestamp() ?? 0)
+                ->values()
+                ->map(fn (ExtractionImage $image) => $this->serializeImage($image))
+                ->all(),
+        ];
+    }
+
+    private function serializeImage(ExtractionImage $image): array
+    {
+        return [
+            'id' => (string) $image->id,
+            'storage_disk' => $image->storage_disk,
+            'path' => $image->path,
+            'original_name' => $image->original_name,
+            'mime_type' => $image->mime_type,
+            'size' => $image->size,
+            'status' => $this->displayStatus($image->status),
+            'attempts' => $image->attempts,
+            'extracted_records' => $image->extracted_records,
+            'confidence_avg' => $image->confidence_avg,
+            'raw_response' => $image->raw_response,
+            'error_message' => $image->error_message,
+            'created_at' => $image->created_at?->toIso8601String(),
+            'started_at' => $image->started_at?->toIso8601String(),
+            'finished_at' => $image->finished_at?->toIso8601String(),
+        ];
+    }
+
+    private function displayStatus(string $status): string
+    {
+        return $status === 'pending' ? 'queued' : $status;
+    }
+
+    private function nullableTimestamp(mixed $value): ?Carbon
+    {
+        if (! $value) {
+            return null;
+        }
+
+        return Carbon::parse($value);
     }
 
     private function withLock(string $batchId, callable $callback): ?array
     {
-        return $this->store()->lock($this->lockKey($batchId), 10)->block(5, function () use ($batchId, $callback): ?array {
-            return $callback($this->find($batchId));
-        });
-    }
-
-    private function key(string $batchId): string
-    {
-        return 'temporary-extraction-batch:'.$batchId;
+        return $this->store()->lock($this->lockKey($batchId), 10)->block(5, $callback);
     }
 
     private function lockKey(string $batchId): string
@@ -171,6 +270,6 @@ class TemporaryExtractionBatchStore
 
     private function store(): CacheRepository
     {
-        return Cache::store('file');
+        return Cache::store(config('cache.default', 'database'));
     }
 }
